@@ -56,7 +56,7 @@ func main() {
 	// ШАГ 5: ЗАПУСКАЕМ СЕРВЕР
 	// ВАЖНО: Слушаем ВСЕ ИНТЕРФЕЙСЫ (0.0.0.0), а не localhost!
 	address := ":" + port
-	logger.InfoLogger.Printf("📡 Сервер запущен на http://0.0.0.0%s/goals", port)
+	logger.InfoLogger.Printf("📡 Сервер запущен на http://0.0.0.0:%s/goals", port)
 
 	log.Fatal(http.ListenAndServe(address, nil))
 }
