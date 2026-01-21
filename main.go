@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 var logger *AppLogger
@@ -20,6 +21,11 @@ func main() {
 	if dbURL == "" {
 		// Для локальной разработки
 		dbURL = "postgres://myuser@localhost:5432/mydb?sslmode=disable"
+	} else {
+		// Добавляем sslmode=require для Heroku
+		if !strings.Contains(dbURL, "sslmode=") {
+			dbURL += "?sslmode=require"
+		}
 	}
 
 	// ШАГ 3: РЕГИСТРИРУЕМ ОБРАБОТЧИКИ
