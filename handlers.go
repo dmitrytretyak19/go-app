@@ -18,10 +18,6 @@ import (
 	"github.com/jackc/pgx/v5" // PostgreSQL драйвер
 )
 
-// ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ДЛЯ СТРОКИ ПОДКЛЮЧЕНИЯ
-// В production: mydb, в тестах: testdb (переключается в тестах)
-var dbURL = "postgres://myuser@localhost:5432/mydb?sslmode=disable"
-
 // СТРУКТУРА ДАННЫХ ЦЕЛИ
 // Соответствует таблице в базе данных
 type Goal struct {
