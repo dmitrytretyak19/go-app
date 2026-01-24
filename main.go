@@ -40,6 +40,8 @@ func main() {
 	// ШАГ 2: ИНИЦИАЛИЗИРУЕМ СИСТЕМУ БЕЗОПАСНОСТИ
 	initSecurity()
 	logger.InfoLogger.Println("🛡️ Система безопасности активирована")
+	initMetrics()
+	registerMetricsEndpoint()
 
 	if file, ok := logger.InfoLogger.Writer().(*os.File); ok {
 		file.Sync()
