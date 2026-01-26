@@ -4,12 +4,13 @@
 //   - Поддержка Heroku (динамический порт, переменные окружения)
 //   - Интеграция с системой безопасности (rate limiting, DDoS protection)
 //   - Профессиональное логирование запросов
+//   - Сбор метрик для мониторинга через Prometheus
 
 package main
 
-// ИМПОРТЫ: Все необходимые пакеты (исправлено)
+// ИМПОРТЫ: Все необходимые пакеты
 import (
-	"context" // ← ДОБАВЛЕН ДЛЯ КОНТЕКСТА
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -40,22 +41,30 @@ func main() {
 	// ШАГ 2: ИНИЦИАЛИЗИРУЕМ СИСТЕМУ БЕЗОПАСНОСТИ
 	initSecurity()
 	logger.InfoLogger.Println("🛡️ Система безопасности активирована")
-	initMetrics()
-	registerMetricsEndpoint()
 
 	if file, ok := logger.InfoLogger.Writer().(*os.File); ok {
 		file.Sync()
 	}
 
-	// ШАГ 3: НАСТРАИВАЕМ ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
-	setupDatabase()
+	// ШАГ 3: ИНИЦИАЛИЗИРУЕМ МОНИТОРИНГ
+	initMetrics()
+	initAlerts()
+	registerMetricsEndpoint()
+	logger.InfoLogger.Println("📊 Система мониторинга активирована")
+
+	if file, ok := logger.InfoLogger.Writer().(*os.File); ok {
+		file.Sync()
+	}
+
+	// ШАГ 4: НАСТРАИВАЕМ ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
+	SetupDatabase()
 	logger.InfoLogger.Println("🗄️ Подключение к базе данных настроено")
 
 	if file, ok := logger.InfoLogger.Writer().(*os.File); ok {
 		file.Sync()
 	}
 
-	// ШАГ 4: РЕГИСТРИРУЕМ ОБРАБОТЧИКИ С MIDDLEWARE БЕЗОПАСНОСТИ
+	// ШАГ 5: РЕГИСТРИРУЕМ ОБРАБОТЧИКИ С MIDDLEWARE
 	registerHandlers()
 	logger.InfoLogger.Println("🔌 Обработчики запросов зарегистрированы")
 
@@ -63,7 +72,7 @@ func main() {
 		file.Sync()
 	}
 
-	// ШАГ 5: ОПРЕДЕЛЯЕМ ПОРТ ДЛЯ ЗАПУСКА
+	// ШАГ 6: ОПРЕДЕЛЯЕМ ПОРТ ДЛЯ ЗАПУСКА
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080" // Порт по умолчанию для локальной разработки
@@ -76,7 +85,7 @@ func main() {
 		file.Sync()
 	}
 
-	// ШАГ 6: ЗАПУСКАЕМ СЕРВЕР
+	// ШАГ 7: ЗАПУСКАЕМ СЕРВЕР
 	address := ":" + port
 	logger.InfoLogger.Printf("📡 Сервер запущен на http://0.0.0.0:%s/goals", port)
 
@@ -95,14 +104,14 @@ func main() {
 
 // ФУНКЦИЯ: setupDatabase
 // НАЗНАЧЕНИЕ: Настраивает подключение к базе данных
-func setupDatabase() {
+func SetupDatabase() {
 	// Получаем строку подключения из переменных окружения (Heroku)
 	dbURL = os.Getenv("DATABASE_URL")
 
 	// Для локальной разработки используем тестовую базу
 	if dbURL == "" {
-		logger.InfoLogger.Println("ℹ️ DATABASE_URL не задан, используем локальную базу данных")
-		dbURL = "postgres://myuser@localhost:5432/mydb?sslmode=disable"
+		dbURL = "postgres://myuser:mypass@localhost:5432/testdb?sslmode=disable"
+		logger.InfoLogger.Println("ℹ️ Используем локальную тестовую базу данных")
 	} else {
 		// Для Heroku добавляем sslmode=require
 		if !strings.Contains(dbURL, "sslmode=") {
@@ -132,13 +141,16 @@ func setupDatabase() {
 }
 
 // ФУНКЦИЯ: registerHandlers
-// НАЗНАЧЕНИЕ: Регистрирует все обработчики с middleware безопасности
+// НАЗНАЧЕНИЕ: Регистрирует все обработчики с middleware безопасности и мониторинга
 func registerHandlers() {
+	http.Handle("/test-panic", alertMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("Тестовая паника для проверки алертинга")
+	})))
 	// Обработчик для /goals
-	http.Handle("/goals", securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Создаём основной обработчик
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.LogRequest(r.Method, r.URL.Path, 0)
 
-		// Логируем IP-адрес для безопасности
 		ip := getIP(r)
 		logger.InfoLogger.Printf("🌐 Запрос от IP: %s | User-Agent: %s",
 			ip, r.Header.Get("User-Agent"))
@@ -152,10 +164,16 @@ func registerHandlers() {
 			logger.LogRequest(r.Method, r.URL.Path, http.StatusMethodNotAllowed)
 			http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
 		}
-	})))
+	})
+
+	// Оборачиваем в middleware
+	wrappedHandler := alertMiddleware(metricsMiddleware(securityMiddleware(handler)))
+
+	// Регистрируем
+	http.Handle("/goals", wrappedHandler)
 
 	// Обработчик для /goals/
-	http.Handle("/goals/", securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/goals/", metricsMiddleware(securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.LogRequest(r.Method, r.URL.Path, 0)
 
 		// Логируем IP-адрес для безопасности
@@ -172,10 +190,10 @@ func registerHandlers() {
 			logger.LogRequest(r.Method, r.URL.Path, http.StatusMethodNotAllowed)
 			http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
 		}
-	})))
+	}))))
 
 	// Обработчик для корневого пути (для удобства)
-	http.Handle("/", securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/", metricsMiddleware(securityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			logger.LogRequest(r.Method, r.URL.Path, http.StatusNotFound)
 			http.NotFound(w, r)
@@ -220,11 +238,12 @@ func registerHandlers() {
 			<div class="footer">
 				<p>Сервер запущен: <strong>` + time.Now().Format(time.RFC3339) + `</strong></p>
 				<p>Защита от DDoS-атак активна ✅</p>
+				<p>Мониторинг через Prometheus активен 📊</p>
 			</div>
 		</body>
 		</html>
 		`))
-	})))
+	}))))
 }
 
 // ФУНКЦИЯ: maskDBURL
@@ -239,6 +258,3 @@ func maskDBURL(url string) string {
 	}
 	return url
 }
-
-// ФУНКЦИЯ: getIP
-// НАЗНАЧЕНИЕ: Получает реальный IP-адрес клиента (учитывая прокси)

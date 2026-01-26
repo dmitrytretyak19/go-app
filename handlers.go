@@ -29,9 +29,12 @@ type Goal struct {
 }
 
 // ОБРАБОТЧИК: GET /goals
-// Получение всех целей из базы данных
+// Получение всех целей из базы данных registeHandlers
 func getGoalsHandler(w http.ResponseWriter, r *http.Request) {
-	// ШАГ 1: ЛОГИРУЕМ НАЧАЛО ОБРАБОТКИ
+	http.Handle("/test-panic", alertMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("Тестовая паника для проверки алертинга")
+	})))
+	// // ШАГ 1: ЛОГИРУЕМ НАЧАЛО ОБРАБОТКИ
 	// Временный статус 0, будет обновлён позже
 	logger.LogRequest(r.Method, r.URL.Path, 0)
 
@@ -39,7 +42,7 @@ func getGoalsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel() // Гарантируем отмену контекста
 
-	conn, err := pgx.Connect(ctx, dbURL)
+	conn, err := pgx.Connect(context.Background(), dbURL)
 	if err != nil {
 		// ЛОГИРУЕМ ОШИБКУ ПОДКЛЮЧЕНИЯ
 		logger.LogError(err, "Подключение к БД в getGoalsHandler")
